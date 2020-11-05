@@ -16,13 +16,13 @@ global_BuildVersion = ""
 global_IsConnectionTest = False
 
 # Default connection params
-global_ftpHost = "192.168.2.110" #10.120.1.97
-global_ftpPort = 22 # 21
-global_ftpUsername = "pi" # root
-global_ftpPassword = "raspberry" #
+global_ftpHost = "192.168.2.110"
+global_ftpPort = 22
+global_ftpUsername = "pi"
+global_ftpPassword = "raspberry"
 
 global_telnetHost = ""
-global_telnetPort = 23 # 8081
+global_telnetPort = 23
 
 class TelnetThread(QThread):
 
@@ -117,7 +117,7 @@ class FtpThread(QThread):
     ftpStatus = pyqtSignal(object)
     # Paths
     tempBuildDir = "C:\\temp"
-    destinationDir = "/files" # /opt/visteon
+    destinationDir = "/files"
 
     def __init__(self):
         QThread.__init__(self)
