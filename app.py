@@ -21,8 +21,12 @@ global_ftpPort = 22
 global_ftpUsername = "pi"
 global_ftpPassword = "raspberry"
 
-global_telnetHost = ""
-global_telnetPort = 23
+global_destinationDir = "/files"
+
+global_telnetHost = "192.168.2.110"
+global_telnetPort = 21
+
+global_7zipPath = "C:\\Program Files (x86)\\7-Zip\\7z.exe"
 
 class TelnetThread(QThread):
 
@@ -44,8 +48,7 @@ class TelnetThread(QThread):
         self.telnet = telnetlib.Telnet(global_telnetHost, int(global_telnetPort))
         try:
             self.telnet.set_debuglevel(9)
-            self.telnet.read_until(b"pihole login: ")
-            #self.telnet.read_until(b"MRA2-IC_E> ")
+            self.telnet.read_until(b"MRA2-IC_H> ")
             self.telnetStatus.emit("Opened Telnet Connection")
         except ConnectionRefusedError as e:
             self.telnetStatus.emit("Telnet connection error" + e)
@@ -105,9 +108,8 @@ class ExtractThread(QThread):
         oFlag += self.tempBuildDir
         oFlag += "\\"
         oFlag += self.buildVersion
-        command = ['C:\\Program Files (x86)\\7-Zip\\7z.exe', 'x', xFlag, oFlag, '-r']
+        command = [global_7zipPath, 'x', xFlag, oFlag, '-r']
         result = run(command, stdout=PIPE, stderr=PIPE, universal_newlines=True)
-        #self.extractStatus.emit(result.returncode, result.stdout, result.stderr)
 
         self.extractStatus.emit(result.stdout)
         self.extractStatus.emit("Finished extracting " + archiveName)
@@ -115,9 +117,7 @@ class ExtractThread(QThread):
 class FtpThread(QThread):
 
     ftpStatus = pyqtSignal(object)
-    # Paths
     tempBuildDir = "C:\\temp"
-    destinationDir = "/files"
 
     def __init__(self):
         QThread.__init__(self)
@@ -125,7 +125,7 @@ class FtpThread(QThread):
     def run(self):
         # Log params
         self.ftpStatus.emit("host: " + global_ftpHost)
-        self.ftpStatus.emit("port: " + global_ftpPort)
+        self.ftpStatus.emit("port: " + str(global_ftpPort))
         self.ftpStatus.emit("username: " + global_ftpUsername)
         self.ftpStatus.emit("password: " + global_ftpPassword)
 
@@ -134,39 +134,69 @@ class FtpThread(QThread):
         try:
             result = self.ftp.login(user=global_ftpUsername, passwd=global_ftpPassword)
             self.ftpStatus.emit(result)
-            self.ftp.cwd(self.destinationDir)
-            ls = []
-            self.ftp.retrlines('LIST', ls.append)
-            for entry in ls:
-                self.ftpStatus.emit(entry)
+        except:
+             self.ftpStatus.emit("FTP login failed")
 
-            self.ftpStatus.emit('Connected')
+        self.ftp.cwd(global_destinationDir)
+        ls = []
+        self.ftp.retrlines('LIST', ls.append)
+        for entry in ls:
+            self.ftpStatus.emit(entry)
 
+        self.ftpStatus.emit('Connected')
+
+        if not global_IsConnectionTest:
             self.removeOldBackup()
             self.createBackup()
             self.createDestinationDirs()
-            if not global_IsConnectionTest:
-                #self.copyHmiToTarget()
-                #self.copyHudToTarget()
-                #self.copyIcBinary()
-                self.copyHudBinary()
-            else:
-                self.ftpStatus.emit("Skipping FTP file transfer. global_IsConnectionTest is set to True")
-        except all_errors as e:
-            self.ftpStatus.emit("FTP login failed")
+            self.copyDeploymentTable()
+            self.copyHmiToTarget()
+            self.copyHudToTarget()
+            self.copyIcBinary()
+            self.copyHudBinary()
+        else:
+            self.ftpStatus.emit("Skipping FTP file transfer. global_IsConnectionTest is set to True")
 
         self.ftp.quit()
-        self.ftpStatus.emit('Disconnected')    
+        self.ftpStatus.emit('Disconnected')
+
+    def copyDeploymentTable(self):
+        src = "If1DeploymentTable-DIHMI.idt"
+        self.ftp.cwd(global_destinationDir + '/hmi')
+        self.ftp.storbinary('STOR If1DeploymentTable-DIHMI.idt', open(src,'rb'))
+        self.ftpStatus.emit("Copied deployment table")
+
+    def FtpRmTree(self, path):
+        wd = self.ftp.pwd()
+        try:
+            names = self.ftp.nlst(path)
+        except all_errors:
+            self.ftpStatus.emit("Could not remove " + path)
+            return
+        for name in names:
+            if os.path.split(name)[1] in (".", ".."): continue
+            try:
+                self.ftp.cwd(name)
+                self.ftp.cwd(wd)
+                self.FtpRmTree(name)
+            except all_errors:
+                self.ftp.delete(name)
+                self.ftpStatus.emit("DELETE " + path)
+        try:
+            self.ftp.rmd(path)
+            self.ftpStatus.emit("RMD " + path)
+        except all_errors:
+            self.ftpStatus.emit("Could not remove " + path)
 
     def removeOldBackup(self):
-        hmi_old = self.destinationDir + "/hmi_old"
+        hmi_old = global_destinationDir + "/hmi_old"
         if "hmi_old" in self.ftp.nlst():
-            self.ftp.rmd(hmi_old)
+            self.FtpRmTree(hmi_old)
         else:
             self.ftpStatus.emit("No hmi_old backup was found on target")
-        hmihud_old = self.destinationDir + "/hmihud_old"
+        hmihud_old = global_destinationDir + "/hmihud_old"
         if "hmihud_old" in self.ftp.nlst():
-            self.ftp.rmd(hmihud_old)
+            self.FtpRmTree(hmihud_old)
         else:
             self.ftpStatus.emit("No hmihud_old backup was found on target")
 
@@ -178,12 +208,12 @@ class FtpThread(QThread):
         if "hmi" in self.ftp.nlst():
             self.ftpStatus.emit("Remote dir hmi exists")
         else:
-            hmi = self.destinationDir + "/hmi"
+            hmi = global_destinationDir + "/hmi"
             self.ftp.mkd(hmi)
         if "hmihud" in self.ftp.nlst():
             self.ftpStatus.emit("Remote dir hmihud exists")
         else:
-            hmihud = self.destinationDir + "/hmihud"
+            hmihud = global_destinationDir + "/hmihud"
             self.ftp.mkd(hmihud)
 
     def copyHudBinary(self):
@@ -193,7 +223,7 @@ class FtpThread(QThread):
         src = os.path.join(src, "hud")
         src = os.path.join(src, "high")
         src = os.path.join(src, "HUDHMIMain_IC_H")
-        self.ftp.cwd(self.destinationDir + '/hmi')
+        self.ftp.cwd(global_destinationDir + '/hmi')
         self.ftp.storbinary('STOR HUDHMIMain_IC_H', open(src,'rb'))
         self.ftpStatus.emit("Copied HUDHMIMain_IC_H to target")
 
@@ -204,7 +234,7 @@ class FtpThread(QThread):
         src = os.path.join(src, "ic")
         src = os.path.join(src, "high")
         src = os.path.join(src, "ICHMIMain_IC_H")
-        self.ftp.cwd(self.destinationDir + '/hmi')
+        self.ftp.cwd(global_destinationDir + '/hmi')
         self.ftp.storbinary('STOR ICHMIMain_IC_H', open(src,'rb'))
         self.ftpStatus.emit("Copied ICHMIMain_IC_H to target")
 
@@ -213,7 +243,7 @@ class FtpThread(QThread):
         src = os.path.join(src, "dihmi_bin")
         src = os.path.join(src, "hmi")
         self.ftpStatus.emit("src: " + src)
-        self.ftp.cwd(self.destinationDir + '/hmi')
+        self.ftp.cwd(global_destinationDir + '/hmi')
         self.placeFiles(src)
         self.ftpStatus.emit("Copied /hmi to target")
 
@@ -221,7 +251,7 @@ class FtpThread(QThread):
         src = os.path.join(self.tempBuildDir, global_BuildVersion)
         src = os.path.join(src, "dihmi_bin")
         src = os.path.join(src, "hmihud")
-        self.ftp.cwd(self.destinationDir + '/hmihud')
+        self.ftp.cwd(global_destinationDir + '/hmihud')
         self.placeFiles(src)
         self.ftpStatus.emit("Copied /hmihud to target")
         
@@ -235,7 +265,6 @@ class FtpThread(QThread):
                 self.ftpStatus.emit("MKD: " + name)
                 try:
                     self.ftp.mkd(name)
-                # ignore "directory already exists"
                 except error_perm as e:
                     if not e.args[0].startswith('550'): 
                         raise
@@ -274,6 +303,9 @@ class TargetUpdateApp(QMainWindow):
         self.testConnectionsBtn = QPushButton("Test connections")
         self.testConnectionsBtn.clicked.connect(lambda:self.connectionsTest())
 
+        self.syncRsetBtn = QPushButton("Sync / Rset")
+        self.syncRsetBtn.clicked.connect(lambda:self.syncRset())
+
         self.hBoxLayout = QHBoxLayout()
         self.hBoxLayout.addWidget(self.labelHost)
         self.hBoxLayout.addWidget(self.inputHost)
@@ -284,6 +316,7 @@ class TargetUpdateApp(QMainWindow):
         self.hBoxLayout.addWidget(self.labelPassword)
         self.hBoxLayout.addWidget(self.inputPassword)
         self.hBoxLayout.addWidget(self.testConnectionsBtn)
+        self.hBoxLayout.addWidget(self.syncRsetBtn)
 
         # Set default connection params
         self.inputHost.setText(global_ftpHost)
@@ -307,7 +340,7 @@ class TargetUpdateApp(QMainWindow):
         self.vBoxlayout.addWidget(self.statusBar)
         self.widget.setLayout(self.vBoxlayout)
 
-        self.resize(900, 900)
+        self.resize(800, 500)
         self.show()
 
     def updateConnectionParams(self):
@@ -328,6 +361,9 @@ class TargetUpdateApp(QMainWindow):
         self.logOutput.append("Test connections")
         self.updateConnectionParams()
         self.startFtpThread(True)
+
+    def syncRset(self):
+        self.startTelnetThread(False)
 
     def createMenu(self):
         extractAction = QAction("&Select archive", self)
@@ -356,7 +392,7 @@ class TargetUpdateApp(QMainWindow):
         if self.isCleanUp:
             self.removeExtractedFromTemp()
             self.removeArchiveFromTemp()
-        self.startTelnetThread()
+        self.logOutput.append("Done")
         
     def onTelnetStatus(self, status):
         self.logOutput.append("Telnet status - " + status)
@@ -426,7 +462,9 @@ class TargetUpdateApp(QMainWindow):
         self.ftpThread.start()
         self.logOutput.append("FTP Thread started")
 
-    def startTelnetThread(self):
+    def startTelnetThread(self, isConnectionTest):
+        global global_IsConnectionTest
+        global_IsConnectionTest = isConnectionTest
         try:
             self.telnetThread.telnetStatus.connect(self.onTelnetStatus, Qt.UniqueConnection)
         except TypeError:
