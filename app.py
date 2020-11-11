@@ -24,7 +24,7 @@ global_ftpPassword = "raspberry"
 global_destinationDir = "/files"
 
 global_telnetHost = "192.168.2.110"
-global_telnetPort = 21
+global_telnetPort = 23
 
 global_7zipPath = "C:\\Program Files (x86)\\7-Zip\\7z.exe"
 
